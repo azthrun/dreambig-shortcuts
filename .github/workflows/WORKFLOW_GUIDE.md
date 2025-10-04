@@ -4,12 +4,31 @@ This document explains how to use the GitHub Actions workflow to build, test, an
 
 ## Workflow Overview
 
-The workflow (`publish-shortcuts-results.yml`) automatically:
-1. Builds the DreamBig.Shortcuts.Results project
-2. Runs all unit tests
-3. Creates a NuGet package (when triggered by a tag)
-4. Publishes the package to NuGet.org (when triggered by a tag)
-5. Creates a GitHub Release with the package attached
+The workflow (`publish-shortcuts-results.yml`) is organized into separate jobs for better control and visibility:
+
+### Job Pipeline
+
+1. **Extract Version** - Extracts version information from git tags
+2. **Build** - Compiles the project (depends on: extract-version)
+3. **Test** - Runs all unit tests (depends on: build)
+4. **Publish** - Creates and publishes NuGet package (depends on: test, only runs for tags)
+5. **Summary** - Generates workflow summary (depends on: all jobs)
+
+### Job Dependencies
+
+```
+extract-version
+       ↓
+     build
+       ↓
+     test
+       ↓
+    publish (only for tags)
+       ↓
+    summary
+```
+
+Each job will only execute if the previous job completes successfully. If the build fails, testing won't run. If tests fail, publishing won't happen.
 
 ## Trigger Conditions
 
@@ -20,8 +39,8 @@ The workflow runs when code is pushed to:
 
 ### Behavior by Trigger Type
 
-- **Branch push (main/release)**: Builds and tests the project, but does NOT publish to NuGet
-- **Tag push**: Builds, tests, creates package, publishes to NuGet.org, and creates a GitHub Release
+- **Branch push (main/release)**: Runs extract-version → build → test → summary (no publish)
+- **Tag push**: Runs extract-version → build → test → publish → summary (full pipeline)
 
 ## Required GitHub Secrets
 
@@ -78,8 +97,8 @@ git push origin Shortcuts.Results-2.0.0-rc.1
 ### Step 3: Monitor the workflow
 1. Go to your repository on GitHub
 2. Click on the "Actions" tab
-3. You should see the workflow running
-4. Click on it to view detailed logs
+3. You should see the workflow running with separate jobs
+4. Click on it to view detailed logs for each job
 
 ### Step 4: Verify publication
 After the workflow completes successfully:
@@ -102,6 +121,82 @@ The version number extracted from the tag will be used for:
 
 Versions containing `beta`, `alpha`, or `rc` will be marked as pre-release in GitHub Releases.
 
+## Job Details
+
+### Extract Version Job
+- Runs on: All triggers
+- Purpose: Parses git tag to extract version number
+- Outputs: `version` and `is_tagged` flags for other jobs
+
+### Build Job
+- Runs on: All triggers
+- Dependencies: extract-version
+- Purpose: Compiles the project in Release configuration
+- Artifacts: Build output (retained for 1 day)
+- Failure impact: Stops the entire pipeline
+
+### Test Job
+- Runs on: All triggers (only if build succeeds)
+- Dependencies: extract-version, build
+- Purpose: Runs all 48 unit tests with code coverage
+- Artifacts: Test results and coverage reports (retained for 30 days)
+- Failure impact: Prevents publishing
+- Features:
+  - Test result reporting
+  - Code coverage collection
+  - Fails if any test fails
+
+### Publish Job
+- Runs on: Only for tagged commits (if test succeeds)
+- Dependencies: extract-version, test
+- Environment: nuget-production (for deployment protection)
+- Purpose: Creates and publishes NuGet package
+- Artifacts: NuGet packages (retained for 30 days)
+- Actions:
+  - Creates .nupkg and .snupkg files
+  - Publishes to NuGet.org
+  - Creates GitHub Release
+
+### Summary Job
+- Runs on: Always (even if previous jobs fail)
+- Dependencies: All other jobs
+- Purpose: Generates comprehensive workflow summary
+- Shows: Job statuses, version info, publication status
+
+## Workflow Features
+
+### Separate Job Execution
+Each phase (build, test, publish) runs in its own job for:
+- Better visibility in the Actions UI
+- Easier debugging
+- Clear failure points
+- Parallel artifact handling
+
+### Build Artifacts
+Build output is shared between jobs via GitHub Actions artifacts, ensuring:
+- Consistent binaries across jobs
+- No need to rebuild for testing
+- Faster workflow execution
+
+### Test Results
+Test results are automatically published and visible in the workflow run summary with:
+- Pass/fail status for each test
+- Code coverage information
+- Test execution time
+
+### Environment Protection
+The publish job uses a GitHub environment (`nuget-production`) which allows you to:
+- Add required reviewers before publishing
+- Set deployment protection rules
+- Track deployment history
+
+### Comprehensive Summary
+The summary job provides a complete overview showing:
+- All job statuses (build, test, publish)
+- Version information
+- Direct link to NuGet package
+- Publication status
+
 ## Package Metadata
 
 The following metadata is included in the NuGet package (configured in `DreamBig.Shortcuts.Results.csproj`):
@@ -114,58 +209,46 @@ The following metadata is included in the NuGet package (configured in `DreamBig
 
 You can customize these values by editing the `.csproj` file.
 
-## Workflow Features
-
-### Build Summary
-After each run, the workflow creates a summary showing:
-- Branch or tag name
-- Commit SHA
-- Package version (if tagged)
-- Publication status
-
-### Test Results
-Test results are automatically published and visible in the workflow run summary.
-
-### Artifacts
-NuGet packages (.nupkg and .snupkg) are uploaded as workflow artifacts and retained for 30 days.
-
-### GitHub Release
-When a tagged version is published:
-- A GitHub Release is automatically created
-- Release notes are auto-generated from commit messages
-- The NuGet package is attached to the release
-- Pre-release versions are marked accordingly
-
 ## Troubleshooting
 
-### Workflow fails at "Publish to NuGet.org"
+### Build job fails
+- Check the build logs in the Actions tab
+- Verify the code compiles locally: `dotnet build --configuration Release`
+- Ensure all dependencies are properly referenced
+
+### Test job fails
+- Review test results in the workflow summary
+- Run tests locally: `dotnet test`
+- Check test logs for specific failure reasons
+- Only passing tests allow the workflow to continue
+
+### Publish job doesn't run
+- Verify you pushed a tag (not just a branch)
+- Ensure tag matches pattern: `Shortcuts.Results-*`
+- Check that build and test jobs completed successfully
+
+### Publish job fails at "Publish to NuGet.org"
 - Verify your `NUGET_API_KEY` secret is set correctly
 - Check that the API key has "Push" permissions
 - Ensure the package version doesn't already exist on NuGet.org
 
-### Tests fail
-- Run tests locally first: `dotnet test`
-- Check the test logs in the workflow run details
-
-### Package already exists
-The workflow uses `--skip-duplicate` flag, so it won't fail if the package version already exists. However, you should avoid re-pushing the same version.
-
-### Invalid version format
-Ensure your tag follows the format: `Shortcuts.Results-<version>`
-The version part should follow semantic versioning (e.g., 1.0.0, 1.0.0-beta.1)
+### Tests pass locally but fail in workflow
+- Check for environment-specific dependencies
+- Verify all test files are committed
+- Look for timing-related test issues
 
 ## Local Testing
 
-You can test package creation locally:
+You can test the workflow steps locally:
 
 ```bash
-# Build in Release mode
+# Build
 dotnet build DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/DreamBig.Shortcuts.Results.csproj --configuration Release
 
-# Run tests
+# Test
 dotnet test DreamBig.Shortcuts.Results/tests/DreamBig.Shortcuts.Results.Tests/DreamBig.Shortcuts.Results.Tests.csproj --configuration Release
 
-# Create package
+# Package
 dotnet pack DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/DreamBig.Shortcuts.Results.csproj \
   --configuration Release \
   -p:Version=1.0.0-local \
@@ -180,3 +263,29 @@ The tag format `Shortcuts.Results-*` is specifically for this project. When you 
 2. Or modify this workflow to handle multiple projects based on the tag prefix
 
 This allows you to version and publish different packages independently within the same repository.
+
+## Advanced Configuration
+
+### Adding Environment Protection Rules
+1. Go to Settings → Environments
+2. Select or create `nuget-production` environment
+3. Add protection rules:
+   - Required reviewers
+   - Wait timer
+   - Deployment branches
+
+### Customizing Job Timeouts
+Add timeout configuration to any job:
+```yaml
+jobs:
+  build:
+    timeout-minutes: 15
+```
+
+### Enabling Matrix Builds
+To test against multiple .NET versions:
+```yaml
+strategy:
+  matrix:
+    dotnet-version: ['8.0.x', '9.0.x']
+```
