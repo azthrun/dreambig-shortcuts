@@ -44,8 +44,13 @@ jobs:
 
           # Extract branch name
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BRANCH="${{ github.event.pull_request.merged && github.event.pull_request.base.ref || '' }}"
-            IS_MERGED="${{ github.event.pull_request.merged }}"
+            if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+              BRANCH="${{ github.event.pull_request.base.ref }}"
+              IS_MERGED="true"
+            else
+              BRANCH=""
+              IS_MERGED="false"
+            fi
           else
             BRANCH="${GITHUB_REF#refs/heads/}"
             IS_MERGED="true"
