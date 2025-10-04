@@ -119,15 +119,6 @@ jobs:
             --logger "trx;LogFileName=test-results.trx" \
             --collect:"XPlat Code Coverage"
 
-      - name: Publish test results
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: Test Results
-          path: '**/test-results.trx'
-          reporter: dotnet-trx
-          fail-on-error: true
-
       - name: Upload test artifacts
         if: always()
         uses: actions/upload-artifact@v4
