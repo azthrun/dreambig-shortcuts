@@ -588,7 +588,7 @@ public sealed class ResultTests
                 .GetConstructor(
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
                     null,
-                    [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)],
+                    _paramTypes,
                     null);
 
             constructor?.Invoke([true, testValue, errorInfo, null]);
@@ -611,7 +611,7 @@ public sealed class ResultTests
                 .GetConstructor(
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
                     null,
-                    [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)],
+                    _paramTypes,
                     null);
 
             constructor?.Invoke([false, testValue, null, null]);
@@ -620,6 +620,8 @@ public sealed class ResultTests
         exception.InnerException.ShouldBeOfType<ArgumentException>();
         exception.InnerException?.Message.ShouldBe("A failure result must have an error.");
     }
+
+    private readonly Type[] _paramTypes = [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)];
 
     private sealed class TestClass
     {
