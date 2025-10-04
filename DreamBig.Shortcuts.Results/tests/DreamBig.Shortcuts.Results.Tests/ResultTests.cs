@@ -574,12 +574,59 @@ public sealed class ResultTests
         result.StatusCode.ShouldBe(401);
     }
 
-    private class TestClass
+    [Fact(DisplayName = "Creating Result with success true and non-null error should throw ArgumentException")]
+    public void Constructor_WithSuccessTrueAndError_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var errorInfo = new Result<TestClass>.ErrorInfo { Message = "Error" };
+        var testValue = new TestClass { Name = "Test" };
+
+        // Act & Assert
+        var exception = Should.Throw<System.Reflection.TargetInvocationException>(() =>
+        {
+            var constructor = typeof(Result<TestClass>)
+                .GetConstructor(
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+                    null,
+                    [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)],
+                    null);
+
+            constructor?.Invoke([true, testValue, errorInfo, null]);
+        });
+
+        exception.InnerException.ShouldBeOfType<ArgumentException>();
+        exception.InnerException?.Message.ShouldBe("A successful result cannot have an error.");
+    }
+
+    [Fact(DisplayName = "Creating Result with success false and null error should throw ArgumentException")]
+    public void Constructor_WithSuccessFalseAndNullError_ShouldThrowArgumentException()
+    {
+        // Arrange
+        var testValue = new TestClass { Name = "Test" };
+
+        // Act & Assert
+        var exception = Should.Throw<System.Reflection.TargetInvocationException>(() =>
+        {
+            var constructor = typeof(Result<TestClass>)
+                .GetConstructor(
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+                    null,
+                    [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)],
+                    null);
+
+            constructor?.Invoke([false, testValue, null, null]);
+        });
+
+        exception.InnerException.ShouldBeOfType<ArgumentException>();
+        exception.InnerException?.Message.ShouldBe("A failure result must have an error.");
+    }
+
+    private sealed class TestClass
     {
         public string? Name { get; set; }
     }
 
-    private class AnotherTestClass
+    private sealed class AnotherTestClass
     {
         public int Id { get; set; }
     }
