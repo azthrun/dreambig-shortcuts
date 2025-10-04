@@ -4,6 +4,25 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    
+    <PackageId>DreamBig.Shortcuts.Results</PackageId>
+    <Authors>DreamBig</Authors>
+    <Company>DreamBig</Company>
+    <Product>DreamBig.Shortcuts.Results</Product>
+    <Description>A lightweight Result pattern implementation for handling success and failure outcomes in .NET applications with support for error information and HTTP status codes.</Description>
+    <PackageTags>result;result-pattern;functional;error-handling;railway-oriented</PackageTags>
+    <PackageProjectUrl>https://github.com/$(GITHUB_REPOSITORY)</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/$(GITHUB_REPOSITORY)</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
+  </ItemGroup>
 
 </Project>

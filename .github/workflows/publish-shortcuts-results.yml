@@ -1,0 +1,140 @@
+name: Build, Test and Publish DreamBig.Shortcuts.Results
+
+on:
+  push:
+    branches:
+      - main
+      - release
+    tags:
+      - 'Shortcuts.Results-*'
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  PROJECT_PATH: 'DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/DreamBig.Shortcuts.Results.csproj'
+  TEST_PROJECT_PATH: 'DreamBig.Shortcuts.Results/tests/DreamBig.Shortcuts.Results.Tests/DreamBig.Shortcuts.Results.Tests.csproj'
+  PACKAGE_OUTPUT_DIRECTORY: ${{ github.workspace }}/packages
+
+jobs:
+  build-test-publish:
+    name: Build, Test and Publish NuGet Package
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: extract_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/Shortcuts.Results-* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/Shortcuts.Results-}"
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+            echo "is_tagged=true" >> $GITHUB_OUTPUT
+            echo "Extracted version: $VERSION"
+          else
+            echo "is_tagged=false" >> $GITHUB_OUTPUT
+            echo "Not a tagged release, skipping version extraction"
+          fi
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Display .NET information
+        run: dotnet --info
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build project
+        run: |
+          if [[ "${{ steps.extract_version.outputs.is_tagged }}" == "true" ]]; then
+            dotnet build ${{ env.PROJECT_PATH }} \
+              --configuration Release \
+              --no-restore \
+              -p:Version=${{ steps.extract_version.outputs.version }} \
+              -p:AssemblyVersion=${{ steps.extract_version.outputs.version }} \
+              -p:FileVersion=${{ steps.extract_version.outputs.version }}
+          else
+            dotnet build ${{ env.PROJECT_PATH }} \
+              --configuration Release \
+              --no-restore
+          fi
+
+      - name: Run tests
+        run: |
+          dotnet test ${{ env.TEST_PROJECT_PATH }} \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Test Results
+          path: '**/test-results.trx'
+          reporter: dotnet-trx
+          fail-on-error: true
+
+      - name: Create NuGet package
+        if: steps.extract_version.outputs.is_tagged == 'true'
+        run: |
+          dotnet pack ${{ env.PROJECT_PATH }} \
+            --configuration Release \
+            --no-build \
+            --output ${{ env.PACKAGE_OUTPUT_DIRECTORY }} \
+            -p:Version=${{ steps.extract_version.outputs.version }} \
+            -p:PackageVersion=${{ steps.extract_version.outputs.version }}
+
+      - name: Display package information
+        if: steps.extract_version.outputs.is_tagged == 'true'
+        run: |
+          echo "Package created:"
+          ls -lh ${{ env.PACKAGE_OUTPUT_DIRECTORY }}
+
+      - name: Publish to NuGet.org
+        if: steps.extract_version.outputs.is_tagged == 'true'
+        run: |
+          dotnet nuget push "${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg" \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Upload NuGet package artifacts
+        if: steps.extract_version.outputs.is_tagged == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: steps.extract_version.outputs.is_tagged == 'true'
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.extract_version.outputs.version, 'beta') || contains(steps.extract_version.outputs.version, 'alpha') || contains(steps.extract_version.outputs.version, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch/Tag:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit SHA:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ steps.extract_version.outputs.is_tagged }}" == "true" ]]; then
+            echo "- **Package Version:** ${{ steps.extract_version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Published to NuGet.org:** ✅" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Build Only:** No package published (not a tagged commit)" >> $GITHUB_STEP_SUMMARY
+          fi
