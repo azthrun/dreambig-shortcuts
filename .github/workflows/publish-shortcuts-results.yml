@@ -58,12 +58,14 @@ jobs:
       - name: Build project
         run: |
           if [[ "${{ needs.extract-version.outputs.is_tagged }}" == "true" ]]; then
+            # Extract numeric version (e.g., 0.0.1 from 0.0.1-alpha.1)
+            NUMERIC_VERSION=$(echo "${{ needs.extract-version.outputs.version }}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
             dotnet build ${{ env.PROJECT_PATH }} \
               --configuration Release \
               --no-restore \
               -p:Version=${{ needs.extract-version.outputs.version }} \
-              -p:AssemblyVersion=${{ needs.extract-version.outputs.version }} \
-              -p:FileVersion=${{ needs.extract-version.outputs.version }}
+              -p:AssemblyVersion=$NUMERIC_VERSION \
+              -p:FileVersion=$NUMERIC_VERSION
           else
             dotnet build ${{ env.PROJECT_PATH }} \
               --configuration Release \
@@ -161,12 +163,14 @@ jobs:
 
       - name: Build project for packaging
         run: |
+          # Extract numeric version (e.g., 0.0.1 from 0.0.1-alpha.1)
+          NUMERIC_VERSION=$(echo "${{ needs.extract-version.outputs.version }}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
           dotnet build ${{ env.PROJECT_PATH }} \
             --configuration Release \
             --no-restore \
             -p:Version=${{ needs.extract-version.outputs.version }} \
-            -p:AssemblyVersion=${{ needs.extract-version.outputs.version }} \
-            -p:FileVersion=${{ needs.extract-version.outputs.version }}
+            -p:AssemblyVersion=$NUMERIC_VERSION \
+            -p:FileVersion=$NUMERIC_VERSION
 
       - name: Create NuGet package
         run: |
