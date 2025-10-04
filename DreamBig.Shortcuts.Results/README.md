@@ -13,7 +13,6 @@ A lightweight, type-safe Result pattern implementation for .NET applications. Th
 - ✅ **Flexible error information**: Support for error messages, exceptions, or both
 - ✅ **HTTP status code support**: Optional status codes for web API scenarios
 - ✅ **Immutable**: All properties are initialized once and cannot be modified
-- ✅ **Railway-oriented programming**: Enables functional programming patterns
 - ✅ **Zero dependencies**: No external packages required
 
 ## Installation
@@ -66,8 +65,8 @@ catch (Exception ex)
 
 // Failure with both message and exception
 var result = Result<User>.Failure(
-    "Failed to retrieve user from database", 
-    exception, 
+    "Failed to retrieve user from database",
+    exception,
     httpStatusCode: 500
 );
 ```
@@ -109,38 +108,38 @@ public class UserRepository
         try
         {
             var user = _dbContext.Users.Find(id);
-            
+
             if (user == null)
             {
                 return Result<User>.Failure("User not found", httpStatusCode: 404);
             }
-            
+
             return Result<User>.Success(user, httpStatusCode: 200);
         }
         catch (Exception ex)
         {
             return Result<User>.Failure(
-                "Database error occurred", 
-                ex, 
+                "Database error occurred",
+                ex,
                 httpStatusCode: 500
             );
         }
     }
-    
+
     public Result<User> Create(User user)
     {
         try
         {
             _dbContext.Users.Add(user);
             _dbContext.SaveChanges();
-            
+
             return Result<User>.Success(user, httpStatusCode: 201);
         }
         catch (DbUpdateException ex)
         {
             return Result<User>.Failure(
-                "Failed to create user", 
-                ex, 
+                "Failed to create user",
+                ex,
                 httpStatusCode: 500
             );
         }
@@ -156,17 +155,17 @@ public class UserRepository
 public class UsersController : ControllerBase
 {
     private readonly UserRepository _repository;
-    
+
     [HttpGet("{id}")]
     public IActionResult GetUser(int id)
     {
         var result = _repository.GetById(id);
-        
+
         if (result.IsSuccess)
         {
             return Ok(result.Value);
         }
-        
+
         return result.StatusCode switch
         {
             404 => NotFound(new { error = result.Error.Message }),
@@ -174,13 +173,13 @@ public class UsersController : ControllerBase
             _ => BadRequest(new { error = result.Error.Message })
         };
     }
-    
+
     [HttpPost]
     public IActionResult CreateUser([FromBody] User user)
     {
         var result = _repository.Create(user);
-        
-        return result.IsSuccess 
+
+        return result.IsSuccess
             ? CreatedAtAction(nameof(GetUser), new { id = result.Value.Id }, result.Value)
             : StatusCode(result.StatusCode ?? 500, new { error = result.Error.Message });
     }
@@ -194,7 +193,7 @@ public class UserService
 {
     private readonly UserRepository _repository;
     private readonly IEmailService _emailService;
-    
+
     public Result<User> RegisterUser(string email, string password)
     {
         // Validate input
@@ -202,7 +201,7 @@ public class UserService
         {
             return Result<User>.Failure("Email is required", httpStatusCode: 400);
         }
-        
+
         try
         {
             // Check if user exists
@@ -210,30 +209,30 @@ public class UserService
             if (existingUser.IsSuccess)
             {
                 return Result<User>.Failure(
-                    "User with this email already exists", 
+                    "User with this email already exists",
                     httpStatusCode: 409
                 );
             }
-            
+
             // Create user
             var user = new User { Email = email, Password = HashPassword(password) };
             var createResult = _repository.Create(user);
-            
+
             if (createResult.IsFailure)
             {
                 return createResult;
             }
-            
+
             // Send welcome email
             _emailService.SendWelcomeEmail(user.Email);
-            
+
             return Result<User>.Success(createResult.Value, httpStatusCode: 201);
         }
         catch (Exception ex)
         {
             return Result<User>.Failure(
-                "An error occurred during registration", 
-                ex, 
+                "An error occurred during registration",
+                ex,
                 httpStatusCode: 500
             );
         }
@@ -253,23 +252,23 @@ public class ProductService
         {
             return Result<Product>.Failure("Product name is required", httpStatusCode: 400);
         }
-        
+
         if (dto.Price <= 0)
         {
             return Result<Product>.Failure("Product price must be greater than zero", httpStatusCode: 400);
         }
-        
+
         if (dto.Price > 10000)
         {
             return Result<Product>.Failure("Product price exceeds maximum allowed", httpStatusCode: 400);
         }
-        
+
         var product = new Product
         {
             Name = dto.Name,
             Price = dto.Price
         };
-        
+
         return Result<Product>.Success(product, httpStatusCode: 200);
     }
 }
@@ -290,12 +289,14 @@ public class ProductService
 #### Factory Methods
 
 **Success Methods:**
+
 ```csharp
 Result<T>.Success(T value)
 Result<T>.Success(T value, int? httpStatusCode)
 ```
 
 **Failure Methods:**
+
 ```csharp
 Result<T>.Failure(string error)
 Result<T>.Failure(string error, int? httpStatusCode)
@@ -331,6 +332,7 @@ Result<User> result = errorInfo; // Implicit conversion
 ### Why Generic Constraint `where T : class`?
 
 The generic constraint requires `T` to be a reference type. This ensures:
+
 - Consistent null semantics for the `Value` property
 - Clear distinction between "no value" (null) and valid values
 - Simpler API without dealing with nullable value types
@@ -338,6 +340,7 @@ The generic constraint requires `T` to be a reference type. This ensures:
 ### Why Immutable Properties?
 
 All properties use `init` setters, making Result objects immutable after creation. This:
+
 - Prevents accidental modification after creation
 - Makes the code more predictable and thread-safe
 - Aligns with functional programming principles
@@ -345,6 +348,7 @@ All properties use `init` setters, making Result objects immutable after creatio
 ### Why Private Constructor?
 
 The private constructor with factory methods:
+
 - Enforces invariants (e.g., failures must have errors)
 - Provides a clear, expressive API
 - Prevents creation of invalid Result objects
@@ -370,11 +374,11 @@ public Result<Order> PlaceOrder(int userId, OrderDto orderDto)
     var userResult = _userRepository.GetById(userId);
     if (userResult.IsFailure)
         return Result<Order>.Failure(userResult.Error.Message, userResult.StatusCode);
-    
+
     var validationResult = ValidateOrder(orderDto);
     if (validationResult.IsFailure)
         return validationResult;
-    
+
     var orderResult = _orderRepository.Create(validationResult.Value);
     return orderResult;
 }
@@ -397,6 +401,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 If you encounter any issues or have questions:
+
 - Open an issue on GitHub
 - Check existing issues for solutions
 - Review the comprehensive test suite for usage examples
