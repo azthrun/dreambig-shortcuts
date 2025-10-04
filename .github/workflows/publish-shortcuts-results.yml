@@ -276,6 +276,7 @@ jobs:
           retention-days: 30
 
       - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
         uses: softprops/action-gh-release@v1
         with:
           tag_name: Shortcuts.Results-${{ needs.determine-version.outputs.version }}
