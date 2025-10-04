@@ -1,0 +1,333 @@
+name: Build, Test and Publish DreamBig.Shortcuts.Results
+
+on:
+  push:
+    branches:
+      - "release/**"
+      - "hotfix/**"
+    tags:
+      - "Shortcuts.Results-*"
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+
+permissions:
+  contents: write
+  packages: read
+
+env:
+  DOTNET_VERSION: "9.0.x"
+  PROJECT_PATH: "DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/DreamBig.Shortcuts.Results.csproj"
+  TEST_PROJECT_PATH: "DreamBig.Shortcuts.Results/tests/DreamBig.Shortcuts.Results.Tests/DreamBig.Shortcuts.Results.Tests.csproj"
+
+jobs:
+  determine-version:
+    name: Determine Version
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.merged == true
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_publish: ${{ steps.version.outputs.should_publish }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          echo "Current ref: ${{ github.ref }}"
+          echo "Event name: ${{ github.event_name }}"
+
+          # Extract branch name
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            if [[ "${{ github.event.pull_request.merged }}" == "true" ]]; then
+              BRANCH="${{ github.event.pull_request.base.ref }}"
+              IS_MERGED="true"
+            else
+              BRANCH=""
+              IS_MERGED="false"
+            fi
+          else
+            BRANCH="${GITHUB_REF#refs/heads/}"
+            IS_MERGED="true"
+          fi
+
+          echo "Branch: $BRANCH"
+          echo "Is merged: $IS_MERGED"
+
+          # Check if this is a tag push with correct format
+          if [[ "${{ github.ref }}" == refs/tags/Shortcuts.Results-* ]]; then
+            TAG_VERSION="${GITHUB_REF#refs/tags/Shortcuts.Results-}"
+            # Validate format: major.minor.revision (with optional prerelease suffix)
+            if [[ "$TAG_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+              echo "✅ Valid tag format detected: $TAG_VERSION"
+              echo "version=$TAG_VERSION" >> $GITHUB_OUTPUT
+              echo "should_publish=true" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "⚠️ Invalid tag format: $TAG_VERSION, will use auto-versioning"
+            fi
+          fi
+
+          # Get the latest version from tags
+          LATEST_TAG=$(git tag -l "Shortcuts.Results-*" | sort -V | tail -n 1)
+          if [[ -n "$LATEST_TAG" ]]; then
+            LATEST_VERSION="${LATEST_TAG#Shortcuts.Results-}"
+            # Extract major.minor.revision (strip prerelease suffix)
+            BASE_VERSION=$(echo "$LATEST_VERSION" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/')
+            IFS='.' read -r MAJOR MINOR REVISION <<< "$BASE_VERSION"
+          else
+            echo "No previous versions found, starting with 0.0.1"
+            MAJOR=0
+            MINOR=0
+            REVISION=1
+          fi
+
+          echo "Latest version: ${MAJOR}.${MINOR}.${REVISION}"
+
+          # Determine version based on branch and event
+          SHOULD_PUBLISH="false"
+
+          # Case 1 & 2: Release or hotfix branch - increment revision
+          if [[ "$BRANCH" =~ ^release/ ]] || [[ "$BRANCH" =~ ^hotfix/ ]]; then
+            REVISION=$((REVISION + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${REVISION}"
+            SHOULD_PUBLISH="true"
+            echo "📦 Release/Hotfix branch detected - incrementing revision to: $NEW_VERSION"
+
+          # Case 3: Main branch from merged PR - increment minor
+          elif [[ "$BRANCH" == "main" ]] && [[ "$IS_MERGED" == "true" ]]; then
+            MINOR=$((MINOR + 1))
+            REVISION=0
+            NEW_VERSION="${MAJOR}.${MINOR}.${REVISION}"
+            SHOULD_PUBLISH="true"
+            echo "📦 Main branch (merged PR) detected - incrementing minor to: $NEW_VERSION"
+
+          # Case: Main branch push (not from PR) - increment revision
+          elif [[ "$BRANCH" == "main" ]]; then
+            REVISION=$((REVISION + 1))
+            NEW_VERSION="${MAJOR}.${MINOR}.${REVISION}"
+            SHOULD_PUBLISH="true"
+            echo "📦 Main branch (direct push) detected - incrementing revision to: $NEW_VERSION"
+
+          else
+            # For other branches, use current version with branch suffix
+            NEW_VERSION="${MAJOR}.${MINOR}.${REVISION}-dev"
+            SHOULD_PUBLISH="false"
+            echo "🔧 Development branch detected - version: $NEW_VERSION (no publish)"
+          fi
+
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "should_publish=$SHOULD_PUBLISH" >> $GITHUB_OUTPUT
+          echo "Final version: $NEW_VERSION"
+          echo "Should publish: $SHOULD_PUBLISH"
+
+  build:
+    name: Build Project
+    runs-on: ubuntu-latest
+    needs: determine-version
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Display .NET information
+        run: dotnet --info
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build project
+        run: |
+          # Extract numeric version (e.g., 0.0.1 from 0.0.1-alpha.1)
+          NUMERIC_VERSION=$(echo "${{ needs.determine-version.outputs.version }}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
+          dotnet build ${{ env.PROJECT_PATH }} \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ needs.determine-version.outputs.version }} \
+            -p:AssemblyVersion=$NUMERIC_VERSION \
+            -p:FileVersion=$NUMERIC_VERSION
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/bin/Release/
+            DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/obj/Release/
+          retention-days: 1
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    needs: [determine-version, build]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: DreamBig.Shortcuts.Results/src/DreamBig.Shortcuts.Results/
+
+      - name: Restore test project dependencies
+        run: dotnet restore ${{ env.TEST_PROJECT_PATH }}
+
+      - name: Build test project
+        run: |
+          dotnet build ${{ env.TEST_PROJECT_PATH }} \
+            --configuration Release \
+            --no-restore
+
+      - name: Run tests
+        run: |
+          dotnet test ${{ env.TEST_PROJECT_PATH }} \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            **/test-results.trx
+            **/coverage.cobertura.xml
+          retention-days: 30
+
+  publish:
+    name: Create and Publish NuGet Package
+    runs-on: ubuntu-latest
+    needs: [determine-version, test]
+    if: needs.determine-version.outputs.should_publish == 'true'
+    environment:
+      name: nuget-production
+      url: https://www.nuget.org/packages/DreamBig.Shortcuts.Results/
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build project for packaging
+        run: |
+          # Extract numeric version (e.g., 0.0.1 from 0.0.1-alpha.1)
+          NUMERIC_VERSION=$(echo "${{ needs.determine-version.outputs.version }}" | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+).*/\1.0/')
+          dotnet build ${{ env.PROJECT_PATH }} \
+            --configuration Release \
+            --no-restore \
+            -p:Version=${{ needs.determine-version.outputs.version }} \
+            -p:AssemblyVersion=$NUMERIC_VERSION \
+            -p:FileVersion=$NUMERIC_VERSION
+
+      - name: Create NuGet package
+        run: |
+          mkdir -p ${{ github.workspace }}/packages
+          dotnet pack ${{ env.PROJECT_PATH }} \
+            --configuration Release \
+            --no-build \
+            --output ${{ github.workspace }}/packages \
+            -p:Version=${{ needs.determine-version.outputs.version }} \
+            -p:PackageVersion=${{ needs.determine-version.outputs.version }}
+
+      - name: Display package information
+        run: |
+          echo "### Package Created Successfully 📦" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ needs.determine-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Files:**" >> $GITHUB_STEP_SUMMARY
+          ls -lh ${{ github.workspace }}/packages | tail -n +2 | awk '{print "- " $9 " (" $5 ")"}' >> $GITHUB_STEP_SUMMARY
+
+      - name: Publish to NuGet.org
+        run: |
+          dotnet nuget push "${{ github.workspace }}/packages/*.nupkg" \
+            --api-key ${{ secrets.NUGET_API_KEY }} \
+            --source https://api.nuget.org/v3/index.json \
+            --skip-duplicate
+
+      - name: Upload NuGet package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ${{ github.workspace }}/packages/*.nupkg
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref == 'refs/heads/main' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'main')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: Shortcuts.Results-${{ needs.determine-version.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          files: ${{ github.workspace }}/packages/*.nupkg
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(needs.determine-version.outputs.version, 'beta') || contains(needs.determine-version.outputs.version, 'alpha') || contains(needs.determine-version.outputs.version, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [determine-version, build, test, publish]
+    if: always()
+
+    steps:
+      - name: Generate workflow summary
+        run: |
+          echo "# Workflow Summary 📊" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Build Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch/Tag:** ${{ github.ref }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit SHA:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          echo "## Job Status" >> $GITHUB_STEP_SUMMARY
+          echo "- **Build:** ${{ needs.build.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Test:** ${{ needs.test.result }}" >> $GITHUB_STEP_SUMMARY
+
+          if [[ "${{ needs.determine-version.outputs.should_publish }}" == "true" ]]; then
+            echo "- **Publish:** ${{ needs.publish.result }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Package Information" >> $GITHUB_STEP_SUMMARY
+            echo "- **Version:** ${{ needs.determine-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            
+            if [[ "${{ needs.publish.result }}" == "success" ]]; then
+              echo "- **Published to NuGet.org:** ✅" >> $GITHUB_STEP_SUMMARY
+              echo "- **Package URL:** https://www.nuget.org/packages/DreamBig.Shortcuts.Results/${{ needs.determine-version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- **Published to NuGet.org:** ❌" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Note:** This is a development build. No package was published." >> $GITHUB_STEP_SUMMARY
+          fi
