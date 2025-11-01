@@ -343,7 +343,7 @@ public sealed class ResultTests
     public void ErrorInfo_ImplicitConversion_WithMessageAndException_ShouldCreateFailureResult()
     {
         // Arrange
-        var errorInfo = new Result<TestClass>.ErrorInfo
+        var errorInfo = new ErrorInfo
         {
             Message = "Test error",
             Exception = new InvalidOperationException("Test exception")
@@ -363,7 +363,7 @@ public sealed class ResultTests
     public void ErrorInfo_ImplicitConversion_WithOnlyMessage_ShouldCreateFailureResultWithException()
     {
         // Arrange
-        var errorInfo = new Result<TestClass>.ErrorInfo
+        var errorInfo = new ErrorInfo
         {
             Message = "Test error"
         };
@@ -384,7 +384,7 @@ public sealed class ResultTests
     {
         // Arrange
         var exception = new InvalidOperationException("Original exception");
-        var errorInfo = new Result<TestClass>.ErrorInfo
+        var errorInfo = new ErrorInfo
         {
             Exception = exception
         };
@@ -403,7 +403,7 @@ public sealed class ResultTests
     public void ErrorInfo_ImplicitConversion_WithNullValues_ShouldCreateFailureResultWithDefaults()
     {
         // Arrange
-        var errorInfo = new Result<TestClass>.ErrorInfo();
+        var errorInfo = new ErrorInfo();
 
         // Act
         Result<TestClass> result = errorInfo;
@@ -578,7 +578,7 @@ public sealed class ResultTests
     public void Constructor_WithSuccessTrueAndError_ShouldThrowArgumentException()
     {
         // Arrange
-        var errorInfo = new Result<TestClass>.ErrorInfo { Message = "Error" };
+        var errorInfo = new ErrorInfo { Message = "Error" };
         var testValue = new TestClass { Name = "Test" };
 
         // Act & Assert
@@ -621,7 +621,7 @@ public sealed class ResultTests
         exception.InnerException?.Message.ShouldBe("A failure result must have an error.");
     }
 
-    private readonly Type[] _paramTypes = [typeof(bool), typeof(TestClass), typeof(Result<TestClass>.ErrorInfo), typeof(int?)];
+    private readonly Type[] _paramTypes = [typeof(bool), typeof(TestClass), typeof(ErrorInfo), typeof(int?)];
 
     private sealed class TestClass
     {
